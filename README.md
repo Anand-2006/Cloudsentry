@@ -92,16 +92,17 @@ g++ -std=c++17 -O2 -pthread -I. benchmarks/skip_list_bench.cpp -o bench_skiplist
 ```bash
 cd api
 uvicorn main:app --reload --port 8000
-# API available at http://localhost:8000
+# API & Dashboard available at http://localhost:8000
 # Docs at http://localhost:8000/docs
 ```
 
 ### Frontend Dashboard
 ```bash
-# no npm, no install — just open directly
-xdg-open frontend/index.html    # Linux
-open frontend/index.html         # macOS
-# or just drag into any browser
+# You can now access the dashboard via the FastAPI server:
+# http://localhost:8000/
+
+# Alternatively, you can still open it directly (mock data fallback):
+# xdg-open frontend/index.html
 ```
 
 The dashboard tries `http://localhost:8000` for live data.

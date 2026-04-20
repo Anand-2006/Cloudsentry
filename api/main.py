@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import subprocess, threading, time, random, math
@@ -109,6 +110,16 @@ def simulate():
             throughput_history.append(routed_this_tick * 2)  # *2 for per-sec
 
 threading.Thread(target=simulate, daemon=True).start()
+
+# ── Static Frontend ──────────────────────────────────────────────────────────
+@app.get("/")
+def serve_dashboard():
+    # Return index.html from the frontend directory
+    # Path is relative to the directory where uvicorn is run (usually the root or api/)
+    # We use absolute path to be safe or join with __file__
+    import os
+    dashboard_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
+    return FileResponse(dashboard_path)
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 @app.get("/status")
