@@ -20,6 +20,7 @@ struct BinomialNode {
 template <typename T>
 class BinomialHeap {
     std::list<BinomialNode<T>*> roots;
+    int count = 0;
 
     void linkNodes(BinomialNode<T>* y, BinomialNode<T>* z) {
         y->parent = z;
@@ -51,14 +52,18 @@ public:
     BinomialHeap() {}
 
     bool empty() const { return roots.empty(); }
+    int size() const { return count; }
 
     void insert(T val) {
         BinomialHeap<T> temp;
         temp.roots.push_back(new BinomialNode<T>(val));
+        temp.count = 1;
         merge(temp);
     }
 
     void merge(BinomialHeap<T>& other) {
+        count += other.count;
+        other.count = 0;
         std::list<BinomialNode<T>*> newRoots = mergeRoots(other);
         roots.clear();
         other.roots.clear();
@@ -115,6 +120,7 @@ public:
 
         merge(childrenHeap);
         delete minNode;
+        count--;
         return minVal;
     }
 };

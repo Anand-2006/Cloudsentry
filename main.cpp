@@ -3,6 +3,7 @@
 #include <vector>
 #include <random>
 #include <chrono>
+#include <math>
 #include "balancer/load_balancer.hpp"
 
 // Simple simulation for a 2nd year project

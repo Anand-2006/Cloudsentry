@@ -23,6 +23,13 @@ struct Request {
     bool operator>(const Request& other) const {
         return deadlineMs > other.deadlineMs;
     }
+    // For Binomial Heap ordering
+    bool operator<(const Request& other) const {
+        return deadlineMs < other.deadlineMs;
+    }
+    bool operator<=(const Request& other) const {
+        return deadlineMs <= other.deadlineMs;
+    }
 };
 #include "../core/binomial_heap.hpp"
 #include "../core/url_trie.hpp"
@@ -55,7 +62,7 @@ class LoadBalancer {
     std::vector<Server*> servers;
     SimpleSkipList serverIndex; 
     URLRouter routeTrie; // Custom Trie (Unit 3)
-    SplayTree sessionCache; // Unit 1: Splay Tree Affinity
+    SessionCache sessionCache; // Unit 1: Splay Tree Affinity
     RateLimiter rateLimiter;
     std::mutex lbMutex;
     
@@ -248,5 +255,29 @@ public:
                       << "Lat: " << (int)s->metrics->avgLatency() << "ms\n";
         }
         std::cout << "---------------------------\n";
+    }
+
+    int getConnections(int sid) {
+        std::lock_guard<std::mutex> lock(lbMutex);
+        if (sid < 0 || sid >= (int)servers.size()) return 0;
+        return servers[sid]->activeConnections;
+    }
+
+    int getQueueSize(int sid) {
+        std::lock_guard<std::mutex> lock(lbMutex);
+        if (sid < 0 || sid >= (int)servers.size()) return 0;
+        return servers[sid]->requestQueue.size();
+    }
+
+    float getErrorRate(int sid) {
+        std::lock_guard<std::mutex> lock(lbMutex);
+        if (sid < 0 || sid >= (int)servers.size()) return 0;
+        return servers[sid]->metrics->errorRate();
+    }
+
+    int getLatency(int sid) {
+        std::lock_guard<std::mutex> lock(lbMutex);
+        if (sid < 0 || sid >= (int)servers.size()) return 0;
+        return (int)servers[sid]->metrics->avgLatency();
     }
 };

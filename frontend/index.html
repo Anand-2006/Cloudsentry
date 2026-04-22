@@ -225,7 +225,7 @@ function ServerCard({s, onKill, onRevive}) {
         gap:'4px 0', fontSize:10, color:'var(--text2)',
       }}>
         <span>conn <span style={{color:'var(--text)'}}>{s.connections}</span></span>
-        <span>queue <span style={{color:'var(--text)'}}>{s.queueDepth}</span></span>
+        <span>queue <span style={{color:'var(--text)'}}>{s.queue}</span></span>
         <span>err <span style={{color: s.errorRate>10?'var(--red)':'var(--text)'}}>{s.errorRate.toFixed(1)}%</span></span>
         <span>lat <span style={{color:'var(--text)'}}>{Math.round(s.avgLatency)}ms</span></span>
       </div>
@@ -570,14 +570,19 @@ function App() {
 
   const servers   = state?.servers || Array.from({length:9},(_,i)=>({
     id:i, zone:ZONES[i%3], connections:0, totalReqs:0,
-    errorRate:0, avgLatency:0, healthy:true, circuit:'CLOSED', queueDepth:0
+    errorRate:0, avgLatency:0, healthy:true, circuit:'CLOSED', queue:0
   }));
   const throughput = state?.throughput || Array(60).fill(0);
   const totalRouted = state?.totalRouted || 0;
+  const simIntensity = state?.simIntensity || 100;
   const tput = throughput[throughput.length-1] || 0;
   const healthy = servers.filter(s=>s.healthy).length;
 
-  const TABS = ['servers','zones','benchmark','ds-info','events'];
+  const TABS = ['servers','zones','interaction','visualizer','benchmark','ds-info','events'];
+
+  const setIntensity = async (v) => {
+      try { await fetch(`${API}/simulation/intensity?val=${v}`, {method:'POST'}); } catch {}
+  };
 
   return (
     <div style={{
@@ -600,7 +605,8 @@ function App() {
           <div style={{fontSize:9,letterSpacing:'.1em',color:'var(--text3)',marginBottom:8,paddingLeft:4}}>NAVIGATION</div>
           {[
             {id:'servers',  label:'Service Grid'},
-            {id:'visualizer', label:'Engine Diagnostics'},
+            {id:'interaction', label:'Engine Diagnostics'},
+            {id:'visualizer', label:'Logic Visualizer'},
             {id:'ds-info',  label:'Architecture Logic'},
             {id:'benchmark',label:'Latency Analysis'},
             {id:'events',   label:'System Log'},
@@ -652,46 +658,9 @@ function App() {
             </div>
           )}
 
-          {/* Visualizer tab */}
-          {tab==='visualizer' && (
-             <div>
-                <SLabel>DISTRIBUTED LOAD INDEXER — SKIP LIST HIERARCHY</SLabel>
-                <SkipListVisualizer servers={servers} deadZones={deadZones} />
-                
-                <div style={{marginTop: 30, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20}}>
-                  <div>
-                    <SLabel>DISTRIBUTED QUEUE VOLUMES</SLabel>
-                    <div style={{display: 'flex', alignItems: 'flex-end', gap: 6, height: 80, padding: '10px 0'}}>
-                        {servers.map(s => (
-                          <div key={s.id} style={{
-                            flex: 1, 
-                            height: `${Math.min(100, s.connections * 10 + 5)}%`, 
-                            background: s.healthy ? 'var(--purple)' : 'var(--border2)',
-                            borderRadius: '3px 3px 0 0',
-                            position: 'relative'
-                          }}>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                  <div>
-                    <SLabel>CORE ANALYTICS ENGINE</SLabel>
-                    <div style={{display:'flex', flexDirection:'column', gap:10}}>
-                        <div style={{background: 'var(--bg3)', padding: 10, borderRadius: 6, border: '1px solid var(--amber)44'}}>
-                            <div style={{fontSize: 9, color: 'var(--amber)', fontWeight: 'bold', marginBottom: 4}}>SESSION PERSISTENCE LAYER</div>
-                            <div style={{fontSize: 11, color: 'var(--text)'}}>Active Sessions: {Math.floor(totalRouted/12)} Cached</div>
-                            <div style={{fontSize: 9, color: 'var(--text3)', marginTop: 4}}>Sub-ms affinity resolution active.</div>
-                        </div>
-                        <div style={{background: 'var(--bg3)', padding: 10, borderRadius: 6, border: '1px solid var(--red)44'}}>
-                            <div style={{fontSize: 9, color: 'var(--red)', fontWeight: 'bold', marginBottom: 4}}>LOAD FORECASTING ENGINE</div>
-                            <div style={{fontSize: 11, color: 'var(--text)'}}>60s Window Analytics Active</div>
-                            <div style={{fontSize: 9, color: 'var(--text3)', marginTop: 4}}>System Peaks: {(Math.random()*8+12).toFixed(1)} req/s peak.</div>
-                        </div>
-                    </div>
-                  </div>
-                </div>
-             </div>
-          )}
+          {/* interaction tab */}
+          {tab==='interaction' && <InteractionPanel intensity={simIntensity} setIntensity={setIntensity} />}
+          {tab==='visualizer' && <LogicVisualizer servers={servers} total={totalRouted} />}
 
           {/* Benchmark tab */}
           {tab==='benchmark' && (
@@ -814,6 +783,359 @@ function App() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Logic Algorithm Visualizer (FULL REWRITE) ──
+function LogicVisualizer({servers, total}) {
+  const totalQueue = servers.reduce((sum, s) => sum + s.connections + (s.queue || 0), 0);
+  const queueBits  = Math.max(1, totalQueue).toString(2).split('').reverse();
+  const activePath = ['/api/v1','/api/v2','/static','/auth'][total % 4];
+  const pathParts  = activePath.split('/').filter(Boolean);
+  const clientId   = 1000 + (total * 7) % 8999;
+  const splayTarget = servers.filter(s=>s.healthy)[0]?.id ?? 0;
+  const deadCount  = servers.filter(s => !s.healthy).length;
+
+  // helpers
+  const nodeW = 80, nodeH = 56, gap = 8;
+  const svgW = 70 + servers.length * (nodeW + gap) + 20; // 70px label offset + padding
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:24}}>
+
+      {/* ───────── SKIP LIST ───────── */}
+      <div style={{background:'rgba(255,255,255,0.02)', padding:24, borderRadius:12, border:'1px solid var(--border)'}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
+          <SLabel>UNIT 4 — SKIP LIST  (LAYERED SEARCH INDEX)</SLabel>
+          <span style={{fontSize:10, color: deadCount ? 'var(--red)' : 'var(--green)', fontWeight:600}}>
+            {deadCount ? `${deadCount} NODE(S) BYPASSED` : 'ALL NODES INDEXED'}
+          </span>
+        </div>
+
+        {/* SVG skip list */}
+        <div style={{overflowX:'auto', paddingBottom:8}}>
+          <svg width={svgW} height={185} style={{display:'block', minWidth:'100%'}}>
+            {/* Level labels */}
+            {['L2 Express','L1 Fast','L0 Base'].map((lbl,li)=>(
+              <text key={li} x={0} y={18 + li*55} fill="var(--text3)" fontSize={8} fontFamily="var(--font-mono)">{lbl}</text>
+            ))}
+
+            {/* Level 2 — every 4th healthy server */}
+            {servers.map((s,i) => {
+              const x = 70 + i*(nodeW+gap);
+              const show = s.healthy && i%4===0;
+              return show ? <React.Fragment key={'l2-'+i}>
+                <rect x={x} y={6} width={nodeW} height={22} rx={4} fill="rgba(0,230,118,0.12)" stroke="var(--green)" strokeWidth={1}/>
+                <text x={x+nodeW/2} y={20} textAnchor="middle" fill="var(--green)" fontSize={9} fontFamily="var(--font-mono)">srv-{String(i).padStart(2,'0')}</text>
+              </React.Fragment> : null;
+            })}
+            {/* L2 arrows */}
+            {(() => {
+              const l2 = servers.map((s,i)=>({s,i})).filter(({s,i})=>s.healthy && i%4===0);
+              return l2.slice(0,-1).map(({i},idx) => {
+                const x1=70+i*(nodeW+gap)+nodeW; const x2=70+l2[idx+1].i*(nodeW+gap);
+                return <line key={'l2a'+idx} x1={x1} y1={17} x2={x2} y2={17} stroke="var(--green)" strokeWidth={1} strokeDasharray="4 2" opacity={0.5}/>;
+              });
+            })()}
+
+            {/* Level 1 — every 2nd healthy */}
+            {servers.map((s,i) => {
+              const x = 70 + i*(nodeW+gap);
+              const show = s.healthy && i%2===0;
+              return show ? <React.Fragment key={'l1-'+i}>
+                <rect x={x} y={60} width={nodeW} height={22} rx={4} fill="rgba(0,176,255,0.1)" stroke="var(--acc)" strokeWidth={1}/>
+                <text x={x+nodeW/2} y={74} textAnchor="middle" fill="var(--acc)" fontSize={9} fontFamily="var(--font-mono)">srv-{String(i).padStart(2,'0')}</text>
+              </React.Fragment> : null;
+            })}
+            {/* L1 arrows */}
+            {(() => {
+              const l1 = servers.map((s,i)=>({s,i})).filter(({s,i})=>s.healthy && i%2===0);
+              return l1.slice(0,-1).map(({i},idx) => {
+                const x1=70+i*(nodeW+gap)+nodeW; const x2=70+l1[idx+1].i*(nodeW+gap);
+                return <line key={'l1a'+idx} x1={x1} y1={71} x2={x2} y2={71} stroke="var(--acc)" strokeWidth={1} strokeDasharray="4 2" opacity={0.4}/>;
+              });
+            })()}
+
+            {/* Level 0 — all servers (base) */}
+            {servers.map((s,i) => {
+              const x = 70 + i*(nodeW+gap);
+              const alive = s.healthy;
+              return <React.Fragment key={'l0-'+i}>
+                <rect x={x} y={115} width={nodeW} height={nodeH} rx={6}
+                  fill={alive ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'}
+                  stroke={alive ? 'var(--border)' : 'var(--red)'}
+                  strokeWidth={alive ? 1 : 1.5}
+                  strokeDasharray={alive ? '0' : '4 2'}
+                />
+                <text x={x+nodeW/2} y={132} textAnchor="middle" fill={alive?'#fff':'var(--red)'} fontSize={10} fontWeight="bold" fontFamily="var(--font-mono)">
+                  srv-{String(i).padStart(2,'0')}
+                </text>
+                <text x={x+nodeW/2} y={146} textAnchor="middle" fill={alive?'var(--text2)':'var(--red)'} fontSize={8} fontFamily="var(--font-mono)">
+                  {alive ? `conn ${s.connections} | q ${s.queue||0}` : '✕ DEAD'}
+                </text>
+                <text x={x+nodeW/2} y={162} textAnchor="middle" fill="var(--text3)" fontSize={7} fontFamily="var(--font-mono)">
+                  {alive ? `${s.errorRate.toFixed(1)}% err` : 'BYPASSED'}
+                </text>
+                {/* vertical links to upper levels */}
+                {alive && i%2===0 && <line x1={x+nodeW/2} y1={115} x2={x+nodeW/2} y2={82} stroke="var(--border)" strokeWidth={1} strokeDasharray="2 2"/>}
+                {alive && i%4===0 && <line x1={x+nodeW/2} y1={60}  x2={x+nodeW/2} y2={28}  stroke="var(--border)" strokeWidth={1} strokeDasharray="2 2"/>}
+              </React.Fragment>;
+            })}
+          </svg>
+        </div>
+        <div style={{fontSize:10, color:'var(--text3)', marginTop:6}}>
+           Probabilistic express lanes allow O(log n) server lookup. Dead nodes are <span style={{color:'var(--red)'}}>removed from all levels</span> — traffic jumps over them.
+        </div>
+      </div>
+
+      {/* ───────── ROW 2: HEAP + TRIE ───────── */}
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:20}}>
+
+        {/* BINOMIAL HEAP */}
+        <div style={{background:'rgba(255,255,255,0.02)', padding:24, borderRadius:12, border:'1px solid var(--border)'}}>
+          <SLabel>UNIT 2 — BINOMIAL HEAP  (PRIORITY QUEUE DECOMPOSITION)</SLabel>
+          <div style={{display:'flex', alignItems:'flex-end', justifyContent:'center', gap:20, minHeight:160, marginTop:16, paddingBottom:10}}>
+            {totalQueue > 0 ? queueBits.map((bit, rank) => {
+              if (bit !== '1') return null;
+              const n = Math.pow(2, rank);
+              const children = rank > 0 ? Array.from({length: Math.min(rank, 4)}) : [];
+              return (
+                <div key={rank} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:2}}>
+                  {/* Root node */}
+                  <div style={{
+                    width: 40+rank*8, height: 40+rank*8, borderRadius:'50%',
+                    background: 'linear-gradient(135deg, var(--purple), #7c3aed)',
+                    boxShadow: '0 0 20px rgba(168,85,247,0.35)',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    color:'#fff', fontSize:10, fontWeight:'bold', border:'2px solid rgba(255,255,255,0.15)'
+                  }}>
+                    {n}
+                  </div>
+                  {/* Children branches */}
+                  {children.length > 0 && <div style={{width:2, height:12, background:'var(--purple)', opacity:0.4}}/>}
+                  {children.length > 0 && (
+                    <div style={{display:'flex', gap:4}}>
+                      {children.map((_,ci) => (
+                        <div key={ci} style={{
+                          width:12, height:12, borderRadius:'50%',
+                          background:'var(--purple)', opacity: 0.3 + ci*0.15,
+                          border:'1px solid rgba(168,85,247,0.3)'
+                        }}/>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{fontSize:8, color:'var(--text3)', marginTop:4}}>B<sub>{rank}</sub></div>
+                </div>
+              );
+            }) : (
+              <div style={{color:'var(--text3)', fontSize:11}}>Queue Empty — No Trees</div>
+            )}
+          </div>
+          <div style={{
+            marginTop:12, padding:'10px 14px', background:'rgba(168,85,247,0.06)',
+            border:'1px solid rgba(168,85,247,0.15)', borderRadius:8, textAlign:'center'
+          }}>
+            <span style={{fontSize:11, color:'var(--purple)', fontWeight:'bold'}}>{totalQueue}</span>
+            <span style={{fontSize:10, color:'var(--text3)'}}> active requests = </span>
+            <span style={{fontSize:11, color:'var(--purple)', fontFamily:'var(--font-mono)'}}>
+              {Math.max(1,totalQueue).toString(2)}₂
+            </span>
+            <span style={{fontSize:10, color:'var(--text3)'}}> → {queueBits.filter(b=>b==='1').length} trees in forest</span>
+          </div>
+        </div>
+
+        {/* URL TRIE */}
+        <div style={{background:'rgba(255,255,255,0.02)', padding:24, borderRadius:12, border:'1px solid var(--border)'}}>
+          <SLabel>UNIT 3 — URL TRIE  (L7 PATH-BASED ROUTING)</SLabel>
+          <div style={{marginTop:16}}>
+            {/* Root */}
+            <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:2}}>
+              <div style={{width:50, height:28, borderRadius:6, background:'#334155', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:'#94a3b8', fontWeight:'bold', border:'1px solid var(--border)'}}>ROOT</div>
+            </div>
+            {/* Branches */}
+            {[
+              {path:'/api/v1', dest:'srv-00,01,02', zone:'us-east-1a', prio:'HIGH'},
+              {path:'/api/v2', dest:'srv-03,04,05', zone:'us-east-1b', prio:'NORM'},
+              {path:'/static',  dest:'srv-06,07,08', zone:'us-west-1a', prio:'LOW'},
+              {path:'/auth',    dest:'round-robin',  zone:'any',        prio:'CRIT'},
+            ].map((route, ri) => {
+              const parts = route.path.split('/').filter(Boolean);
+              const isActive = activePath === route.path;
+              const color = isActive ? 'var(--acc2)' : 'var(--text3)';
+              return (
+                <div key={ri} style={{
+                  display:'flex', alignItems:'center', gap:6, padding:'5px 0 5px 16px',
+                  borderLeft: `2px solid ${isActive ? 'var(--acc2)' : 'var(--border)'}`,
+                  marginLeft: 24, transition:'all .3s',
+                  background: isActive ? 'rgba(0,230,118,0.04)' : 'transparent',
+                  borderRadius: '0 6px 6px 0',
+                }}>
+                  {parts.map((p,pi) => (
+                    <React.Fragment key={pi}>
+                      <div style={{
+                        padding:'3px 10px', borderRadius:4, fontSize:10, fontFamily:'var(--font-mono)',
+                        background: isActive ? 'rgba(0,230,118,0.12)' : 'rgba(255,255,255,0.03)',
+                        color, border:`1px solid ${isActive ? 'var(--acc2)' : 'var(--border)'}`,
+                        fontWeight: isActive ? 'bold' : 'normal',
+                      }}>/{p}</div>
+                      {pi < parts.length-1 && <span style={{color:'var(--border)'}}>→</span>}
+                    </React.Fragment>
+                  ))}
+                  <span style={{color:'var(--border)', margin:'0 4px'}}>→</span>
+                  <span style={{fontSize:9, color, fontFamily:'var(--font-mono)'}}>
+                    {route.dest}
+                  </span>
+                  <Badge label={route.prio} color={isActive ? 'var(--acc2)' : '#475569'}/>
+                  {isActive && <span style={{fontSize:9, color:'var(--acc2)', marginLeft:4, animation:'pulse 1s infinite'}}>● ACTIVE</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{fontSize:10, color:'var(--text3)', marginTop:14}}>
+            Character-by-character prefix matching resolves each request path in O(L) time.
+          </div>
+        </div>
+      </div>
+
+      {/* ───────── ROW 3: SPLAY + SEGMENT ───────── */}
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:20}}>
+
+        {/* SPLAY TREE */}
+        <div style={{background:'rgba(255,255,255,0.02)', padding:24, borderRadius:12, border:'1px solid var(--border)'}}>
+          <SLabel>UNIT 1 — SPLAY TREE  (SESSION AFFINITY CACHE)</SLabel>
+          <div style={{display:'flex', gap:20, marginTop:16}}>
+            {/* Visual tree */}
+            <div style={{flex:'0 0 140px'}}>
+              <svg width={140} height={130}>
+                {/* Root */}
+                <circle cx={70} cy={20} r={16} fill="var(--amber)" opacity={0.9}/>
+                <text x={70} y={24} textAnchor="middle" fill="#000" fontSize={9} fontWeight="bold">{clientId}</text>
+                <text x={70} y={13} textAnchor="middle" fill="rgba(0,0,0,0.5)" fontSize={6}>ROOT</text>
+                {/* Left child */}
+                <line x1={58} y1={34} x2={35} y2={55} stroke="var(--border)" strokeWidth={1}/>
+                <circle cx={35} cy={68} r={12} fill="rgba(255,255,255,0.05)" stroke="var(--border)"/>
+                <text x={35} y={71} textAnchor="middle" fill="var(--text3)" fontSize={8}>{clientId-120}</text>
+                {/* Right child */}
+                <line x1={82} y1={34} x2={105} y2={55} stroke="var(--border)" strokeWidth={1}/>
+                <circle cx={105} cy={68} r={12} fill="rgba(255,255,255,0.05)" stroke="var(--border)"/>
+                <text x={105} y={71} textAnchor="middle" fill="var(--text3)" fontSize={8}>{clientId+45}</text>
+                {/* Grandchildren */}
+                <line x1={27} y1={78} x2={15} y2={100} stroke="var(--border)" strokeWidth={1} opacity={0.4}/>
+                <circle cx={15} cy={108} r={8} fill="rgba(255,255,255,0.02)" stroke="var(--border)" opacity={0.4}/>
+                <line x1={43} y1={78} x2={55} y2={100} stroke="var(--border)" strokeWidth={1} opacity={0.4}/>
+                <circle cx={55} cy={108} r={8} fill="rgba(255,255,255,0.02)" stroke="var(--border)" opacity={0.4}/>
+                {/* Splay arrow */}
+                <path d="M 130 100 C 140 60, 110 10, 90 18" fill="none" stroke="var(--amber)" strokeWidth={1.5} strokeDasharray="3 2"/>
+                <polygon points="88,14 94,18 90,22" fill="var(--amber)"/>
+                <text x={132} y={112} fill="var(--amber)" fontSize={7} fontFamily="var(--font-mono)">SPLAY</text>
+              </svg>
+            </div>
+            {/* Log panel */}
+            <div style={{flex:1, background:'#000', borderRadius:8, padding:12, fontFamily:'var(--font-mono)', fontSize:10, border:'1px solid var(--border)', overflow:'hidden'}}>
+              <div style={{color:'var(--text3)', marginBottom:8, borderBottom:'1px solid var(--border)', paddingBottom:6}}>SESSION CACHE LOG</div>
+              {[0,1,2,3].map(offset => {
+                const cid = 1000 + ((total - offset) * 7) % 8999;
+                const sid = servers.filter(s=>s.healthy)[offset % servers.filter(s=>s.healthy).length]?.id ?? 0;
+                return (
+                  <div key={offset} style={{marginBottom:4, opacity: 1 - offset*0.2}}>
+                    <span style={{color:'var(--text3)'}}>client.</span>
+                    <span style={{color:'var(--amber)'}}>{cid}</span>
+                    <span style={{color:'var(--text3)'}}> → splay → </span>
+                    <span style={{color:'var(--green)'}}>srv-{String(sid).padStart(2,'0')}</span>
+                    {offset === 0 && <span style={{color:'var(--amber)', marginLeft:6}}>★ ROOT</span>}
+                  </div>
+                );
+              })}
+              <div style={{marginTop:8, color:'var(--green)', borderTop:'1px solid var(--border)', paddingTop:6}}>
+                Amortized O(1) hit for repeat clients.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* SEGMENT TREE — Peak Load */}
+        <div style={{background:'rgba(255,255,255,0.02)', padding:24, borderRadius:12, border:'1px solid var(--border)'}}>
+          <SLabel>UNIT 5 — SEGMENT TREE  (RANGE MAX QUERY — PEAK LOAD)</SLabel>
+          <div style={{marginTop:16}}>
+            {/* Bar chart of per-server peak connections */}
+            <div style={{display:'flex', alignItems:'flex-end', gap:8, height:120, padding:'0 4px'}}>
+              {(() => {
+                const maxVal = Math.max(1, ...servers.map(sv => sv.connections + (sv.queue||0)));
+                return servers.map((s,i) => {
+                  const val = s.connections + (s.queue || 0);
+                  const barH = Math.max(6, (val / maxVal) * 110);
+                  const isMax = val === maxVal && val > 0;
+                  return (
+                    <div key={i} style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2, justifyContent:'flex-end', height:'100%'}}>
+                      <span style={{fontSize:9, fontWeight: isMax ? 'bold' : 'normal', color: isMax ? 'var(--red)' : 'var(--text2)'}}>{val}</span>
+                      <div style={{
+                        width:'100%', height: barH,
+                        background: !s.healthy ? 'repeating-linear-gradient(45deg, var(--border), var(--border) 2px, transparent 2px, transparent 4px)' : isMax ? 
+                          'linear-gradient(to top, var(--red), #f97316)' : 
+                          'linear-gradient(to top, var(--acc), #0ea5e9)',
+                        borderRadius:'4px 4px 0 0',
+                        transition:'height 0.5s ease',
+                        boxShadow: isMax ? '0 0 12px rgba(239,68,68,0.4)' : 'none',
+                        border: isMax ? '1px solid var(--red)' : 'none',
+                      }}/>
+                      <span style={{fontSize:8, color: s.healthy ? 'var(--text3)' : 'var(--red)', fontFamily:'var(--font-mono)'}}>{String(i).padStart(2,'0')}</span>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            {/* RMQ Result */}
+            {(() => {
+              const maxSrv = servers.reduce((best, s) => (s.connections + (s.queue||0)) > (best.connections + (best.queue||0)) ? s : best, servers[0]);
+              const maxLoad = maxSrv.connections + (maxSrv.queue || 0);
+              return (
+                <div style={{
+                  marginTop:14, padding:'10px 14px',
+                  background: 'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.15)',
+                  borderRadius:8, display:'flex', justifyContent:'space-between', alignItems:'center'
+                }}>
+                  <div>
+                    <div style={{fontSize:9, color:'var(--red)', fontWeight:'bold', marginBottom:2}}>RMQ RESULT [0..{servers.length-1}]</div>
+                    <div style={{fontSize:10, color:'var(--text2)'}}>
+                      Peak server: <b style={{color:'#fff'}}>srv-{String(maxSrv.id).padStart(2,'0')}</b> at <b style={{color:'var(--red)'}}>{maxLoad}</b> active items
+                    </div>
+                  </div>
+                  <div style={{fontSize:9, color:'var(--text3)', textAlign:'right'}}>
+                    Query: O(log n)<br/>Update: O(log n)
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
+
+      {/* ───────── ROUTING FLOW SUMMARY ───────── */}
+      <div style={{
+        padding:'14px 20px', background:'rgba(255,255,255,0.015)',
+        border:'1px solid var(--border)', borderRadius:10,
+        display:'flex', gap:12, alignItems:'center', justifyContent:'center', flexWrap:'wrap'
+      }}>
+        {[
+          {label:'Request In', icon:'📥', color:'var(--text2)'},
+          {label:'Splay Cache', icon:'🌳', color:'var(--amber)', unit:'U1'},
+          {label:'Heap Queue', icon:'⚙️', color:'var(--purple)', unit:'U2'},
+          {label:'Trie Route', icon:'🔀', color:'var(--acc2)', unit:'U3'},
+          {label:'Skip Index', icon:'⚡', color:'var(--acc)', unit:'U4'},
+          {label:'Peak Track', icon:'📊', color:'var(--red)', unit:'U5'},
+          {label:'Response', icon:'✅', color:'var(--green)'},
+        ].map((step,i,arr) => (
+          <React.Fragment key={i}>
+            <div style={{display:'flex', alignItems:'center', gap:6, padding:'4px 10px', background:'rgba(255,255,255,0.03)', borderRadius:6, border:`1px solid ${step.color}22`}}>
+              <span>{step.icon}</span>
+              <span style={{fontSize:9, color:step.color, fontWeight:'bold'}}>{step.label}</span>
+              {step.unit && <span style={{fontSize:7, color:'var(--text3)'}}>({step.unit})</span>}
+            </div>
+            {i < arr.length-1 && <span style={{color:'var(--border)', fontSize:12}}>→</span>}
+          </React.Fragment>
+        ))}
       </div>
     </div>
   );
