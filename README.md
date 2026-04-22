@@ -78,4 +78,3 @@ Then, visit: **`http://localhost:8000`**
 *   **Predictive Diagnostics**: The Segment Tree-based analytics allow the system to detect "micro-bursts" that standard 5-second polling intervals would miss.
 
 ---
-**Developed by CloudSentry Engineering Core**

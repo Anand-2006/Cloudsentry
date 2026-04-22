@@ -578,7 +578,7 @@ function App() {
   const tput = throughput[throughput.length-1] || 0;
   const healthy = servers.filter(s=>s.healthy).length;
 
-  const TABS = ['servers','zones','interaction','visualizer','benchmark','ds-info','events'];
+  const TABS = ['servers','zones','interaction','visualizer','benchmark','events'];
 
   const setIntensity = async (v) => {
       try { await fetch(`${API}/simulation/intensity?val=${v}`, {method:'POST'}); } catch {}
@@ -607,7 +607,6 @@ function App() {
             {id:'servers',  label:'Service Grid'},
             {id:'interaction', label:'Engine Diagnostics'},
             {id:'visualizer', label:'Logic Visualizer'},
-            {id:'ds-info',  label:'Architecture Logic'},
             {id:'benchmark',label:'Latency Analysis'},
             {id:'events',   label:'System Log'},
           ].map(t=>(
@@ -754,26 +753,7 @@ function App() {
              </div>
           )}
 
-          {/* DS Info tab */}
-          {tab==='ds-info' && (
-            <div>
-              <SLabel>DATA STRUCTURES — ROLE MAP</SLabel>
-              <DSInfoPanel/>
-              <div style={{marginTop:20,padding:'14px 16px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8}}>
-                <div style={{fontSize:10,color:'var(--accent)',marginBottom:8,letterSpacing:'.06em'}}>ROUTING FLOW</div>
-                <div style={{fontSize:11,color:'var(--text2)',lineHeight:2.1,fontFamily:'var(--font-mono)'}}>
-                  Request →{' '}
-                  <span style={{color:'var(--amber)'}}>Splay Tree (Unit 1)</span>{' '}Affinity Check →{' '}
-                  <span style={{color:'var(--accent)'}}>URL Trie (Unit 3)</span>{' '}Path Match →{' '}
-                  <span style={{color:'var(--green)'}}>Skip List (Unit 4)</span>{' '}Search →{' '}
-                  <span style={{color:'var(--purple)'}}>Binomial Heap (Unit 2)</span>{' '}Queueing →{' '}
-                  <span style={{color:'var(--red)'}}>Segment Tree (Unit 5)</span>{' '}Peak Tracking<br/>
-                  Result →{' '}
-                  <span style={{color:'var(--purple)'}}>Binomial Merge</span>{' '}O(log n) Failover
-                </div>
-              </div>
-            </div>
-          )}
+
 
           {/* Events tab */}
           {tab==='events' && (

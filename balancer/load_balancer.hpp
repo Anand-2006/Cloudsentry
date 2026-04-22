@@ -280,4 +280,15 @@ public:
         if (sid < 0 || sid >= (int)servers.size()) return 0;
         return (int)servers[sid]->metrics->avgLatency();
     }
+
+    const char* getCircuitState(int sid) {
+        std::lock_guard<std::mutex> lock(lbMutex);
+        if (sid < 0 || sid >= (int)servers.size()) return "DEAD";
+        switch(servers[sid]->circuitState) {
+            case CircuitState::CLOSED: return "CLOSED";
+            case CircuitState::OPEN: return "OPEN";
+            case CircuitState::HALF_OPEN: return "HALF_OPEN";
+            default: return "UNKNOWN";
+        }
+    }
 };

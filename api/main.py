@@ -43,6 +43,14 @@ try:
     lib.lb_get_latency.restype = ctypes.c_int
     lib.lb_get_latency.argtypes = [ctypes.c_void_p, ctypes.c_int]
 
+    lib.lb_get_circuit_state.restype = ctypes.c_char_p
+    lib.lb_get_circuit_state.argtypes = [ctypes.c_void_p, ctypes.c_int]
+
+    lib.lb_kill_server.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.lb_revive_server.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.lb_kill_zone.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    lib.lb_revive_zone.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+
     class PyLoadBalancer:
         def __init__(self, n=9):
             self.obj = lib.lb_create(n)
@@ -66,8 +74,14 @@ try:
                 "connections": lib.lb_get_connections(self.obj, sid),
                 "queue": lib.lb_get_queue_size(self.obj, sid),
                 "errorRate": lib.lb_get_error_rate(self.obj, sid),
-                "avgLatency": lib.lb_get_latency(self.obj, sid)
+                "avgLatency": lib.lb_get_latency(self.obj, sid),
+                "circuit": lib.lb_get_circuit_state(self.obj, sid).decode('utf-8')
             }
+        
+        def kill_server(self, sid): lib.lb_kill_server(self.obj, sid)
+        def revive_server(self, sid): lib.lb_revive_server(self.obj, sid)
+        def kill_zone(self, zone): lib.lb_kill_zone(self.obj, ctypes.c_char_p(zone.encode('utf-8')))
+        def revive_zone(self, zone): lib.lb_revive_zone(self.obj, ctypes.c_char_p(zone.encode('utf-8')))
 
     lb = PyLoadBalancer(9)
 except Exception as e:
@@ -97,12 +111,7 @@ class ServerInstance:
     def __init__(self, sid):
         self.sid = sid
         self.zone = ZONES[sid % 3]
-        self.connections = 0
-        self.totalReqs = 0
-        self.errorRate = 0.0
-        self.avgLatency = 0.0
         self.healthy = True
-        self.circuit = "CLOSED"
 
 servers = [ServerInstance(i) for i in range(NUM_SERVERS)]
 dead_zones = set()
@@ -217,7 +226,7 @@ def get_status():
                 "errorRate": m["errorRate"],
                 "avgLatency": m["avgLatency"],
                 "healthy": s.healthy,
-                "circuit": s.circuit
+                "circuit": m["circuit"]
             })
 
         return {
@@ -249,14 +258,20 @@ def trie_lookup(path: str):
 @app.post("/zone/kill/{zone}")
 def kill_zone(zone: str):
     with lock:
+        lb.kill_zone(zone)
         dead_zones.add(zone)
+        for s in servers:
+            if s.zone == zone: s.healthy = False
         events.appendleft({"type": "kill", "msg": f"Zone {zone} Offline [Queue Merge O(N log N)]", "ts": int(time.time())})
     return {"ok": True}
 
 @app.post("/zone/revive/{zone}")
 def revive_zone(zone: str):
     with lock:
+        lb.revive_zone(zone)
         dead_zones.discard(zone)
+        for s in servers:
+            if s.zone == zone: s.healthy = True
         events.appendleft({"type": "revive", "msg": f"Zone {zone} Restored [Index Rebuild O(N)]", "ts": int(time.time())})
     return {"ok": True}
 
@@ -264,6 +279,7 @@ def revive_zone(zone: str):
 def kill_server(sid: int):
     with lock:
         if 0 <= sid < NUM_SERVERS:
+            lb.kill_server(sid)
             servers[sid].healthy = False
             events.appendleft({"type": "kill", "msg": f"Server {sid} Shutdown [P-Queue Extraction O(log N)]", "ts": int(time.time())})
     return {"ok": True}
@@ -272,6 +288,7 @@ def kill_server(sid: int):
 def revive_server(sid: int):
     with lock:
         if 0 <= sid < NUM_SERVERS:
+            lb.revive_server(sid)
             servers[sid].healthy = True
             events.appendleft({"type": "revive", "msg": f"Server {sid} Restarted [Skip List Insert O(log N)]", "ts": int(time.time())})
     return {"ok": True}

@@ -43,4 +43,24 @@ extern "C" {
     int lb_get_latency(LoadBalancer* lb, int sid) {
         return lb->getLatency(sid);
     }
+
+    const char* lb_get_circuit_state(LoadBalancer* lb, int sid) {
+        return lb->getCircuitState(sid);
+    }
+
+    void lb_kill_server(LoadBalancer* lb, int sid) {
+        lb->killServer(sid);
+    }
+
+    void lb_revive_server(LoadBalancer* lb, int sid) {
+        lb->reviveServer(sid);
+    }
+
+    void lb_kill_zone(LoadBalancer* lb, const char* zone) {
+        if (zone) lb->killZone(std::string(zone));
+    }
+
+    void lb_revive_zone(LoadBalancer* lb, const char* zone) {
+        if (zone) lb->reviveZone(std::string(zone));
+    }
 }

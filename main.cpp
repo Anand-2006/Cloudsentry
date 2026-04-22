@@ -3,10 +3,9 @@
 #include <vector>
 #include <random>
 #include <chrono>
-#include <math>
+#include <cmath>
 #include "balancer/load_balancer.hpp"
 
-// Simple simulation for a 2nd year project
 void simulateTraffic(LoadBalancer& lb, int numRequests) {
     std::mt19937 rng(42);
     std::uniform_int_distribution<int> latDist(10, 150);
