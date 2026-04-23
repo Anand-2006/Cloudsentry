@@ -2,7 +2,6 @@
 #include <vector>
 #include <numeric>
 
-// A simple sliding window metrics tracker for a 2nd year project.
 // Replaces the complex Segment Tree with a simple array of buckets.
 
 class SlidingWindowMetrics {

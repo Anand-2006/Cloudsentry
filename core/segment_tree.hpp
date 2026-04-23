@@ -4,7 +4,7 @@
 #include <vector>
 #include <algorithm>
 
-// Manual Segment Tree Implementation (Unit 5)
+// Manual Segment Tree Implementation 
 // Supporting Range Maximum Queries (RMQ) for peak throughput analytics.
 // Allows O(log n) updates and O(log n) range queries.
 class PeakSegmentTree {

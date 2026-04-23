@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-// Manual Splay Tree Implementation (Unit 1)
+// Manual Splay Tree Implementation 
 // Used for "Session Affinity" - caching client-to-server assignments.
 // Recently used client lookups are amortized O(1).
 struct SplayNode {

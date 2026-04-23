@@ -204,10 +204,12 @@ function ServerCard({s, onKill, onRevive}) {
         </div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4}}>
           <Dot alive={s.healthy}/>
-          <span style={{
-            fontSize:9,letterSpacing:'.06em',fontWeight:600,
-            color: s.circuit==='OPEN'?'var(--red)':s.circuit==='DEAD'?'var(--red2)':'var(--green2)',
-          }}>{s.circuit}</span>
+          {s.circuit && s.circuit !== 'CLOSED' && (
+            <span style={{
+              fontSize:9,letterSpacing:'.06em',fontWeight:600,
+              color: s.circuit==='OPEN'?'var(--red)':'var(--amber)',
+            }}>{s.circuit}</span>
+          )}
         </div>
       </div>
 
@@ -507,6 +509,7 @@ function App() {
   const [benchData, setBenchData] = useState(DEFAULT_BENCH);
   const [loadingBench, setLoading] = useState(false);
   const [events, setEvents]       = useState([]);
+  const [chaosEnabled, setChaos]   = useState(false);
   const stateRef = useRef(null);
 
   const addEvent = useCallback((type, msg) => {
@@ -524,6 +527,7 @@ function App() {
           stateRef.current = data;
           setDeadZones(data.deadZones || []);
           setEvents(data.events || []);
+          if (data.chaosEnabled !== undefined) setChaos(data.chaosEnabled);
         }
       } catch {}
     }, 1200);
@@ -658,7 +662,7 @@ function App() {
           )}
 
           {/* interaction tab */}
-          {tab==='interaction' && <InteractionPanel intensity={simIntensity} setIntensity={setIntensity} />}
+          {tab==='interaction' && <InteractionPanel intensity={simIntensity} setIntensity={setIntensity} chaosEnabled={chaosEnabled} setChaos={setChaos} />}
           {tab==='visualizer' && <LogicVisualizer servers={servers} total={totalRouted} />}
 
           {/* Benchmark tab */}
@@ -762,6 +766,176 @@ function App() {
               <EventLog events={events}/>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Engine Diagnostics (Interaction Panel) ──
+function InteractionPanel({intensity, setIntensity, chaosEnabled, setChaos}) {
+  const [sliderVal, setSliderVal] = useState(intensity || 100);
+  const [trieInput, setTrieInput] = useState('/api/v1/users');
+  const [trieResult, setTrieResult] = useState(null);
+  const API = window.location.origin;
+
+  const handleSlider = (e) => {
+    const v = parseInt(e.target.value);
+    setSliderVal(v);
+    setIntensity(v);
+  };
+
+  const testTrie = async () => {
+    try {
+      const r = await fetch(`${API}/tools/lookup?path=${encodeURIComponent(trieInput)}`);
+      if (r.ok) setTrieResult(await r.json());
+    } catch(e) { setTrieResult({error: String(e)}); }
+  };
+
+  const toggleChaos = async () => {
+    try {
+      const r = await fetch(`${API}/chaos/toggle`, {method:'POST'});
+      if (r.ok) {
+        const data = await r.json();
+        setChaos(data.enabled);
+      }
+    } catch(e) { console.error(e); }
+  };
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:20}}>
+      <SLabel>ENGINE DIAGNOSTICS — COMMAND CENTER</SLabel>
+
+      {/* Chaos Monkey Toggle */}
+      <div style={{
+        background: chaosEnabled ? 'rgba(239,68,68,0.06)' : 'var(--bg2)',
+        padding:20, borderRadius:10,
+        border: `1px solid ${chaosEnabled ? 'rgba(239,68,68,0.3)' : 'var(--border)'}`,
+        transition: 'all .3s',
+      }}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+          <div>
+            <div style={{fontSize:10, color: chaosEnabled ? 'var(--red)' : 'var(--text3)', letterSpacing:'.06em', fontWeight:'bold'}}>
+              🐒 CHAOS MONKEY — RESILIENCE TESTING
+            </div>
+            <div style={{fontSize:10, color:'var(--text3)', marginTop:6, lineHeight:1.5}}>
+              Randomly kills 1-2 servers every 8-15s, auto-revives after 5-10s.
+              Tests failover (Binomial Heap merge), rebalancing (Skip List + Segment Tree), and zone recovery (Union-Find DSU).
+            </div>
+          </div>
+          <button onClick={toggleChaos} style={{
+            minWidth:100, padding:'10px 20px', borderRadius:8, cursor:'pointer',
+            fontWeight:'bold', fontSize:11, letterSpacing:'.04em',
+            fontFamily:'var(--font-mono)',
+            transition: 'all .2s',
+            border: chaosEnabled ? '2px solid var(--red)' : '2px solid var(--green)',
+            background: chaosEnabled ? 'rgba(239,68,68,0.15)' : 'rgba(0,230,118,0.1)',
+            color: chaosEnabled ? 'var(--red)' : 'var(--green)',
+            animation: chaosEnabled ? 'pulse 2s infinite' : 'none',
+          }}>
+            {chaosEnabled ? '⏹ STOP' : '▶ START'}
+          </button>
+        </div>
+        {chaosEnabled && (
+          <div style={{
+            marginTop:12, padding:8, background:'rgba(239,68,68,0.08)',
+            borderRadius:6, fontSize:10, color:'var(--red)',
+            display:'flex', alignItems:'center', gap:8,
+            border:'1px solid rgba(239,68,68,0.15)'
+          }}>
+            <span style={{
+              display:'inline-block', width:8, height:8, borderRadius:'50%',
+              background:'var(--red)', animation:'pulse 1s infinite'
+            }}/>
+            CHAOS MODE ACTIVE — servers are being randomly killed and revived
+          </div>
+        )}
+      </div>
+
+      {/* Traffic Intensity Slider */}
+      <div style={{background:'var(--bg2)', padding:20, borderRadius:10, border:'1px solid var(--border)'}}>
+        <div style={{fontSize:10, color:'var(--text3)', letterSpacing:'.06em', marginBottom:10}}>TRAFFIC INTENSITY CONTROL</div>
+        <div style={{display:'flex', alignItems:'center', gap:16}}>
+          <input type="range" min="10" max="500" value={sliderVal} onChange={handleSlider}
+            style={{flex:1, accentColor:'var(--acc)'}} />
+          <div style={{
+            minWidth:60, textAlign:'center', padding:'6px 12px',
+            background: sliderVal > 300 ? 'rgba(239,68,68,0.15)' : sliderVal > 150 ? 'rgba(251,191,36,0.15)' : 'rgba(0,230,118,0.1)',
+            color: sliderVal > 300 ? 'var(--red)' : sliderVal > 150 ? 'var(--amber)' : 'var(--green)',
+            borderRadius:6, fontSize:14, fontWeight:'bold', fontFamily:'var(--font-mono)',
+            border: `1px solid ${sliderVal > 300 ? 'var(--red)' : sliderVal > 150 ? 'var(--amber)' : 'var(--green)'}44`
+          }}>{sliderVal}%</div>
+        </div>
+        <div style={{display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text3)', marginTop:6}}>
+          <span>10% (Idle)</span><span>100% (Normal)</span><span>500% (Extreme Stress)</span>
+        </div>
+        <div style={{fontSize:10, color:'var(--text3)', marginTop:12}}>
+          Directly controls the simulation loop's request volume. Higher values stress-test the Binomial Heap queuing and Segment Tree peak tracking.
+        </div>
+      </div>
+
+      {/* L7 Route Tester */}
+      <div style={{background:'var(--bg2)', padding:20, borderRadius:10, border:'1px solid var(--border)'}}>
+        <div style={{fontSize:10, color:'var(--text3)', letterSpacing:'.06em', marginBottom:10}}>L7 ROUTE RESOLVER — TRIE LOOKUP LAB</div>
+        <div style={{display:'flex', gap:8}}>
+          <input type="text" value={trieInput}
+            onChange={e => setTrieInput(e.target.value)}
+            placeholder="/api/v1/resource"
+            style={{
+              flex:1, background:'#000', border:'1px solid var(--border)',
+              color:'#fff', padding:'8px 12px', borderRadius:6,
+              fontFamily:'var(--font-mono)', fontSize:12
+            }}
+          />
+          <button onClick={testTrie} style={{
+            background:'var(--acc)', border:'none', color:'#000',
+            fontWeight:'bold', padding:'8px 16px', borderRadius:6, cursor:'pointer', fontSize:11
+          }}>RESOLVE</button>
+        </div>
+        {trieResult && (
+          <div style={{
+            marginTop:12, padding:12, background:'#000', borderRadius:6,
+            border:'1px solid var(--border)', fontFamily:'var(--font-mono)', fontSize:11
+          }}>
+            <div style={{color:'var(--text3)'}}>$ trie.route("{trieResult.path}")</div>
+            <div style={{color:'var(--acc2)', marginTop:4}}>
+              → Server ID: <b style={{color:'#fff'}}>{trieResult.resolved_server_id}</b>
+            </div>
+            <div style={{color:'var(--text3)', marginTop:4, fontSize:10}}>
+              {trieResult.explanation}
+            </div>
+          </div>
+        )}
+        <div style={{fontSize:10, color:'var(--text3)', marginTop:10}}>
+          Test the URL Trie's prefix matching. Try paths like <code style={{color:'var(--acc)'}}>/api/v1</code>, <code style={{color:'var(--acc)'}}>/static/img</code>, or <code style={{color:'var(--acc)'}}>/auth/login</code>.
+        </div>
+      </div>
+
+      {/* System Info */}
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+        <div style={{padding:14, background:'rgba(239,68,68,0.04)', border:'1px solid rgba(239,68,68,0.12)', borderRadius:8}}>
+          <div style={{fontSize:9, color:'var(--red)', fontWeight:'bold', marginBottom:6}}>FAILOVER ENGINE</div>
+          <div style={{fontSize:10, color:'var(--text3)', lineHeight:1.6}}>
+            Killing a server triggers <b style={{color:'var(--text2)'}}>Binomial Heap merge</b> — all pending requests migrate to a healthy node in O(log n) time.
+          </div>
+        </div>
+        <div style={{padding:14, background:'rgba(0,230,118,0.04)', border:'1px solid rgba(0,230,118,0.12)', borderRadius:8}}>
+          <div style={{fontSize:9, color:'var(--green)', fontWeight:'bold', marginBottom:6}}>SESSION PERSISTENCE</div>
+          <div style={{fontSize:10, color:'var(--text3)', lineHeight:1.6}}>
+            Repeat client traffic is cached via <b style={{color:'var(--text2)'}}>Splay Tree</b> rotations — recently queried clients resolve in amortized O(1).
+          </div>
+        </div>
+        <div style={{padding:14, background:'rgba(0,176,255,0.04)', border:'1px solid rgba(0,176,255,0.12)', borderRadius:8}}>
+          <div style={{fontSize:9, color:'var(--acc)', fontWeight:'bold', marginBottom:6}}>CIRCUIT BREAKER</div>
+          <div style={{fontSize:10, color:'var(--text3)', lineHeight:1.6}}>
+            Servers with {'>'} 50% error rate are automatically <b style={{color:'var(--text2)'}}>circuit-opened</b>. Recovery triggers half-open probe after 5 seconds.
+          </div>
+        </div>
+        <div style={{padding:14, background:'rgba(168,85,247,0.04)', border:'1px solid rgba(168,85,247,0.12)', borderRadius:8}}>
+          <div style={{fontSize:9, color:'var(--purple)', fontWeight:'bold', marginBottom:6}}>RATE LIMITER</div>
+          <div style={{fontSize:10, color:'var(--text3)', lineHeight:1.6}}>
+            Token Bucket algorithm enforces per-client rate limits. Burst capacity: <b style={{color:'var(--text2)'}}>50 tokens</b>, refill: <b style={{color:'var(--text2)'}}>15/sec</b>.
+          </div>
         </div>
       </div>
     </div>

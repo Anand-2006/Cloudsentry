@@ -7,7 +7,6 @@ import math
 from collections import deque
 import ctypes
 
-# --- C++ Bridge Logic ---
 class RouteResult(ctypes.Structure):
     _fields_ = [
         ("accepted", ctypes.c_bool),
@@ -16,7 +15,6 @@ class RouteResult(ctypes.Structure):
         ("reason", ctypes.c_char_p)
     ]
 
-# Load the shared library
 try:
     lib_path = os.path.join(os.path.dirname(__file__), "..", "build", "libcloudsentry_lib.so")
     lib = ctypes.CDLL(lib_path)
@@ -86,7 +84,6 @@ try:
     lb = PyLoadBalancer(9)
 except Exception as e:
     print(f"[ERROR] Failed to load C++ Library: {e}")
-    # Fallback to dummy if needed
     class DummyLB:
         def route(self, cid, pr, path): return {"accepted": True, "serverId": cid % 9, "requestId": 0, "reason": "MOCK"}
         def complete(self, s, r, l, f): pass
@@ -103,7 +100,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Simulation State ---
 NUM_SERVERS = 9
 ZONES = ["us-east-1a", "us-east-1b", "us-west-1a"]
 
@@ -120,11 +116,9 @@ throughput_history = deque([0]*60, maxlen=60)
 total_routed = 0
 lock = threading.Lock()
 
-# Interactivity Controls
-SIM_INTENSITY = 100 # Percentage (100 = Normal)
+SIM_INTENSITY = 100 
 MAUAL_PATH_OVERRIDE = None
 
-# --- Background Worker ---
 def delayed_complete(sid, rid, latency, failed):
     time.sleep(latency / 1000.0)
     with lock:
@@ -137,32 +131,26 @@ def simulation_loop():
 
     while True:
         try:
-            # 1. Rhythmic Random Wave (Oscillates faster and less predictably)
             t = time.time()
             wave = abs(math.sin(t / 7.0)) + (math.cos(t / 11.0) * 0.3)
-            base_load = 45 # Increased base floor
-            amplitude = 120 # Increased swing
+            base_load = 45 
+            amplitude = 120 
             
-            # Apply Manual Intensity Multiplier
             target_load = (base_load + (wave * amplitude)) * (SIM_INTENSITY / 100.0)
             
-            # 2. Occasional "Super Bursts" (8% chance, heavier)
             if random.random() < 0.08:
                 target_load += random.randint(100, 200)
                 print(f"[Simulation] Rare Traffic Spike: {int(target_load)} req/s")
 
-            # 3. Session Management (Refill pool)
             while len(active_sessions) < 12:
                 active_sessions.append([random.randint(100, 999), random.randint(3, 8), random.choice(paths)])
             
-            # Batch size (More Gaussian jitter for randomness)
-            batch_size = int(random.gauss(target_load, 25)) # Increased jitter from 5 to 25
-            batch_size = max(15, batch_size) # Higher minimum floor
+            batch_size = int(random.gauss(target_load, 25)) 
+            batch_size = max(15, batch_size) 
             
             actually_routed = 0
             with lock:
                 for _ in range(batch_size):
-                    # Pick an existing session or new client
                     if random.random() < 0.7 and active_sessions:
                         idx = random.randint(0, len(active_sessions)-1)
                         client_id, rem, path = active_sessions[idx]
@@ -179,8 +167,6 @@ def simulation_loop():
                     if res['accepted']:
                         total_routed += 1
                         actually_routed += 1
-                        # Make latency significantly higher so connections visually back up 
-                        # in the dashboard between polling cycles.
                         lat = int(random.gauss(1500, 300))
                         lat = max(200, min(3000, lat))
                         is_error = random.random() < 0.015
@@ -201,10 +187,7 @@ def simulation_loop():
             print(f"[CRITICAL] Simulation Rhythmic Loop Error: {sim_err}")
             time.sleep(2)
 
-# Start real C++ backed simulation
 threading.Thread(target=simulation_loop, daemon=True).start()
-
-# --- API Endpoints ---
 
 @app.get("/")
 def serve_dashboard():
@@ -214,7 +197,6 @@ def serve_dashboard():
 @app.get("/status")
 def get_status():
     with lock:
-        # PULL REAL METRICS FROM C++ BACKEND
         server_stats = []
         for s in servers:
             m = lb.get_metrics(s.sid)
@@ -235,7 +217,8 @@ def get_status():
             "events": list(events),
             "throughput": list(throughput_history),
             "deadZones": list(dead_zones),
-            "simIntensity": SIM_INTENSITY # Return current slider value
+            "simIntensity": SIM_INTENSITY,
+            "chaosEnabled": CHAOS_ENABLED
         }
 
 @app.post("/simulation/intensity")
@@ -246,8 +229,6 @@ def set_intensity(val: int):
 
 @app.get("/tools/lookup")
 def trie_lookup(path: str):
-    # Perform a dry-run route to see what the Trie thinks
-    # (Client ID 999 is reserved for the 'Checker' tool)
     res = lb.route(999, 1, path)
     return {
         "path": path,
@@ -296,12 +277,9 @@ def revive_server(sid: int):
 @app.get("/bench")
 def run_benchmark():
     try:
-        # Build and run the C++ benchmark
         base_dir = os.path.join(os.path.dirname(__file__), "..")
-        # Ensure it's compiled
         subprocess.run(["g++", "-std=c++17", "benchmarks/skip_list_bench.cpp", "-o", "bench_skiplist"], 
                        cwd=base_dir, check=True)
-        # Run it
         result = subprocess.run(["./bench_skiplist"], cwd=base_dir, capture_output=True, text=True)
         return json.loads(result.stdout)
     except Exception as e:
@@ -310,3 +288,72 @@ def run_benchmark():
 @app.get("/zones")
 def get_zones():
     return {"zones": ZONES}
+
+# ── Chaos Monkey ──────────────────────────────────────────
+CHAOS_ENABLED = False
+chaos_events_log = deque(maxlen=20)
+
+def chaos_monkey_loop():
+    global CHAOS_ENABLED
+    while True:
+        try:
+            if not CHAOS_ENABLED:
+                time.sleep(1)
+                continue
+
+            time.sleep(random.uniform(8, 15))  # wait between chaos events
+            if not CHAOS_ENABLED:
+                continue
+
+            with lock:
+                alive_ids = [s.sid for s in servers if s.healthy]
+                if len(alive_ids) <= 2:
+                    # Don't kill if only 2 servers left
+                    time.sleep(3)
+                    continue
+
+                # Kill 1-2 random servers
+                kill_count = min(random.randint(1, 2), len(alive_ids) - 2)
+                victims = random.sample(alive_ids, kill_count)
+                for sid in victims:
+                    lb.kill_server(sid)
+                    servers[sid].healthy = False
+                    msg = f"🐒 Chaos Monkey killed srv-{sid:02d}"
+                    events.appendleft({"type": "chaos", "msg": msg, "ts": int(time.time())})
+                    chaos_events_log.appendleft({"action": "kill", "server": sid, "ts": int(time.time())})
+
+            # Auto-revive after 5-10 seconds
+            revive_delay = random.uniform(5, 10)
+            time.sleep(revive_delay)
+
+            if not CHAOS_ENABLED:
+                # If chaos was disabled during wait, still revive
+                pass
+
+            with lock:
+                for sid in victims:
+                    if not servers[sid].healthy:
+                        lb.revive_server(sid)
+                        servers[sid].healthy = True
+                        msg = f"🔄 Chaos Monkey revived srv-{sid:02d}"
+                        events.appendleft({"type": "revive", "msg": msg, "ts": int(time.time())})
+                        chaos_events_log.appendleft({"action": "revive", "server": sid, "ts": int(time.time())})
+
+        except Exception as e:
+            print(f"[Chaos Monkey Error] {e}")
+            time.sleep(3)
+
+threading.Thread(target=chaos_monkey_loop, daemon=True).start()
+
+@app.post("/chaos/toggle")
+def toggle_chaos():
+    global CHAOS_ENABLED
+    CHAOS_ENABLED = not CHAOS_ENABLED
+    state = "ENABLED" if CHAOS_ENABLED else "DISABLED"
+    events.appendleft({"type": "chaos", "msg": f"🐒 Chaos Monkey {state}", "ts": int(time.time())})
+    return {"enabled": CHAOS_ENABLED}
+
+@app.get("/chaos/status")
+def chaos_status():
+    return {"enabled": CHAOS_ENABLED, "log": list(chaos_events_log)}
+

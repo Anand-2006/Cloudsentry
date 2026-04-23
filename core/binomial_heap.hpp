@@ -6,8 +6,7 @@
 #include <list>
 #include <algorithm>
 
-// Custom Binomial Heap implementation (Unit 2)
-// This version uses std::list for the root list for cleaner code.
+// Custom Binomial Heap implementation 
 template <typename T>
 struct BinomialNode {
     T data;
