@@ -353,23 +353,29 @@ function EventLog({events}) {
     revive: {color:'var(--green)', border:'var(--green2)'},
     spike:  {color:'var(--amber)', border:'var(--amber2)'},
     info:   {color:'var(--accent)',border:'var(--accent2)'},
+    drop:   {color:'var(--amber)', border:'var(--amber)'},
+    chaos:  {color:'var(--purple)',border:'var(--purple)'},
   };
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+    <div style={{display:'flex',flexDirection:'column',gap:8}}>
       {events.length === 0
         ? <div style={{color:'var(--text3)',fontSize:12,padding:'12px 0'}}>No events yet.</div>
-        : events.slice(0,8).map((e,i)=>{
+        : events.slice(0, 15).map((e,i)=>{
             const s = TYPE_STYLE[e.type]||TYPE_STYLE.info;
+            const timeStr = e.ts ? new Date(e.ts * 1000).toLocaleTimeString([], {hour12:false}) : '';
             return (
               <div key={i} style={{
-                fontSize:11, padding:'6px 10px',
-                borderLeft:`2px solid ${s.border}`,
-                background:`${s.border}10`,
-                borderRadius:'0 4px 4px 0',
+                fontSize:11, padding:'8px 12px',
+                borderLeft:`3px solid ${s.border}`,
+                background:`${s.border}15`,
+                borderRadius:'0 6px 6px 0',
                 color: s.color,
+                display: 'flex', gap: 12,
+                fontFamily: 'var(--font-mono)',
                 animation:'slideIn .2s ease',
               }}>
-                {e.msg}
+                <span style={{color:'var(--text3)', minWidth:60, opacity:0.7}}>{timeStr}</span>
+                <span>{e.msg}</span>
               </div>
             );
           })
@@ -549,25 +555,21 @@ function App() {
   };
 
   const killZone = async (zone) => {
-    addEvent('kill', `Zone ${zone} KILLED — Binomial Heap failover triggered`);
     setDeadZones(dz => [...dz, zone]);
     try { await fetch(`${API}/zone/kill/${zone}`, {method:'POST'}); } catch {}
   };
 
   const reviveZone = async (zone) => {
-    addEvent('revive', `Zone ${zone} REVIVED — DSU component re-enabled`);
     setDeadZones(dz => dz.filter(z => z !== zone));
     try { await fetch(`${API}/zone/revive/${zone}`, {method:'POST'}); } catch {}
   };
 
   const killSrv = async (id) => {
-    addEvent('kill', `Server ${id} KILLED — queue merged via Binomial Heap O(log n)`);
     setDeadSrvs(ds => [...ds, id]);
     try { await fetch(`${API}/server/kill/${id}`, {method:'POST'}); } catch {}
   };
 
   const reviveSrv = async (id) => {
-    addEvent('revive', `Server ${id} REVIVED — rejoining skip list index`);
     setDeadSrvs(ds => ds.filter(s => s !== id));
     try { await fetch(`${API}/server/revive/${id}`, {method:'POST'}); } catch {}
   };
@@ -777,6 +779,8 @@ function InteractionPanel({intensity, setIntensity, chaosEnabled, setChaos}) {
   const [sliderVal, setSliderVal] = useState(intensity || 100);
   const [trieInput, setTrieInput] = useState('/api/v1/users');
   const [trieResult, setTrieResult] = useState(null);
+  const [ddosStatus, setDdosStatus] = useState(false);
+  const [affinityStatus, setAffinityStatus] = useState(false);
   const API = window.location.origin;
 
   const handleSlider = (e) => {
@@ -871,6 +875,41 @@ function InteractionPanel({intensity, setIntensity, chaosEnabled, setChaos}) {
         </div>
         <div style={{fontSize:10, color:'var(--text3)', marginTop:12}}>
           Directly controls the simulation loop's request volume. Higher values stress-test the Binomial Heap queuing and Segment Tree peak tracking.
+        </div>
+      </div>
+
+      {/* Scenario Demonstrations */}
+      <div style={{background:'var(--bg2)', padding:20, borderRadius:10, border:'1px solid var(--border)'}}>
+        <div style={{fontSize:10, color:'var(--text3)', letterSpacing:'.06em', marginBottom:12}}>SCENARIO DEMONSTRATIONS</div>
+        <div style={{display:'flex', gap:12}}>
+          <button onClick={async () => {
+            setDdosStatus(true);
+            try { await fetch(`${API}/demo/ddos`, {method:'POST'}); } catch {}
+            setTimeout(() => setDdosStatus(false), 2000);
+          }} style={{
+            flex:1, padding:'12px', borderRadius:8, cursor:'pointer', border:'1px solid rgba(239,68,68,0.3)',
+            background:'rgba(239,68,68,0.1)', color:'var(--red)', fontWeight:'bold', fontSize:11, fontFamily:'var(--font-mono)',
+            transition:'all 0.2s'
+          }}>
+            {ddosStatus ? '✅ ATTACK INJECTED!' : '🛑 SIMULATE DDoS ATTACK'}
+            <div style={{fontSize:9, color:'var(--text3)', marginTop:4, fontWeight:'normal'}}>Triggers Token Bucket drops</div>
+          </button>
+          
+          <button onClick={async () => {
+            setAffinityStatus(true);
+            try { await fetch(`${API}/demo/affinity`, {method:'POST'}); } catch {}
+            setTimeout(() => setAffinityStatus(false), 2000);
+          }} style={{
+            flex:1, padding:'12px', borderRadius:8, cursor:'pointer', border:'1px solid rgba(251,191,36,0.3)',
+            background:'rgba(251,191,36,0.1)', color:'var(--amber)', fontWeight:'bold', fontSize:11, fontFamily:'var(--font-mono)',
+            transition:'all 0.2s'
+          }}>
+            {affinityStatus ? '✅ BURST INJECTED!' : '⚡ SESSION AFFINITY BURST'}
+            <div style={{fontSize:9, color:'var(--text3)', marginTop:4, fontWeight:'normal'}}>Triggers Splay Tree cache hits</div>
+          </button>
+        </div>
+        <div style={{fontSize:10, color:'var(--text3)', marginTop:12}}>
+          Use these buttons to inject specific traffic patterns and watch the Event Log react.
         </div>
       </div>
 
@@ -1266,6 +1305,86 @@ function LogicVisualizer({servers, total}) {
         </div>
       </div>
 
+      {/* ───────── ROW 4: RATE LIMITER + DSU ───────── */}
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:20}}>
+        
+        {/* TOKEN BUCKET */}
+        <div style={{background:'rgba(255,255,255,0.02)', padding:24, borderRadius:12, border:'1px solid var(--border)'}}>
+          <SLabel>UNIT 6 — TOKEN BUCKET  (RATE LIMITER)</SLabel>
+          <div style={{display:'flex', gap:20, marginTop:16, alignItems:'center'}}>
+            <div style={{
+              width:60, height:80, border:'2px solid var(--border)',
+              borderTop:'none', borderRadius:'0 0 8px 8px',
+              position:'relative', overflow:'hidden',
+              background:'rgba(0,0,0,0.3)',
+              display:'flex', flexDirection:'column', justifyContent:'flex-end'
+            }}>
+              {(() => {
+                const drain = (total * 7) % 100;
+                const fillPct = Math.max(10, 100 - drain); 
+                return (
+                  <div style={{
+                    width:'100%', height:`${fillPct}%`,
+                    background: fillPct > 30 ? 'rgba(0,230,118,0.6)' : 'rgba(251,191,36,0.8)',
+                    transition:'height 0.2s, background 0.3s'
+                  }}/>
+                );
+              })()}
+              <div style={{
+                position:'absolute', top:0, left:'50%', transform:'translateX(-50%)',
+                width:8, height:8, borderRadius:'50%', background:'var(--green)',
+                opacity: total % 2 === 0 ? 1 : 0, transition:'opacity 0.1s'
+              }}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:10, color:'var(--text2)', marginBottom:6}}>PER-CLIENT QUOTA ENFORCEMENT</div>
+              <div style={{display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text3)', borderBottom:'1px solid var(--border)', paddingBottom:4, marginBottom:4}}>
+                <span>Capacity</span> <span style={{color:'#fff'}}>100 Tokens</span>
+              </div>
+              <div style={{display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text3)', borderBottom:'1px solid var(--border)', paddingBottom:4, marginBottom:4}}>
+                <span>Refill Rate</span> <span style={{color:'var(--green)'}}>10/sec</span>
+              </div>
+              <div style={{display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text3)'}}>
+                <span>Algorithm</span> <span style={{color:'var(--acc)'}}>O(1) Lock-free Check</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* UNION-FIND DSU */}
+        <div style={{background:'rgba(255,255,255,0.02)', padding:24, borderRadius:12, border:'1px solid var(--border)'}}>
+          <SLabel>UNIT 7 — UNION-FIND  (ZONE FAILOVER DSU)</SLabel>
+          <div style={{marginTop:16, display:'flex', justifyContent:'center', alignItems:'center', gap:10}}>
+            {['us-east-1a','us-east-1b','us-west-1a'].map((zone, zi, arr) => {
+               const serversInZone = servers.filter(s => s.zone === zone);
+               const isDead = serversInZone.length > 0 && serversInZone.every(s => !s.healthy);
+               return (
+                 <React.Fragment key={zone}>
+                   <div style={{
+                     padding:'10px', borderRadius:8, flex:1,
+                     background: isDead ? 'rgba(239,68,68,0.05)' : 'rgba(0,230,118,0.05)',
+                     border: `1px solid ${isDead ? 'var(--red)' : 'var(--green)'}`,
+                     textAlign:'center', transition:'all 0.3s'
+                   }}>
+                     <div style={{fontSize:9, fontWeight:'bold', color: isDead ? 'var(--red)' : 'var(--green)'}}>SET {zi}</div>
+                     <div style={{fontSize:8, color:'var(--text3)', marginTop:2}}>{zone}</div>
+                   </div>
+                   {zi < arr.length-1 && (
+                     <div style={{fontSize:14, color: isDead ? 'var(--red)' : 'var(--border)', opacity:0.6}}>
+                       {isDead ? '✕' : '⟷'}
+                     </div>
+                   )}
+                 </React.Fragment>
+               );
+            })}
+          </div>
+          <div style={{fontSize:10, color:'var(--text3)', marginTop:14, textAlign:'center'}}>
+            Path compression keeps zone-availability checks at near O(1) time.
+          </div>
+        </div>
+
+      </div>
+
       {/* ───────── ROUTING FLOW SUMMARY ───────── */}
       <div style={{
         padding:'14px 20px', background:'rgba(255,255,255,0.015)',
@@ -1274,7 +1393,9 @@ function LogicVisualizer({servers, total}) {
       }}>
         {[
           {label:'Request In', icon:'📥', color:'var(--text2)'},
+          {label:'Rate Limit', icon:'🛡️', color:'var(--green)', unit:'U6'},
           {label:'Splay Cache', icon:'🌳', color:'var(--amber)', unit:'U1'},
+          {label:'Zone Check', icon:'🌍', color:'var(--text)', unit:'U7'},
           {label:'Heap Queue', icon:'⚙️', color:'var(--purple)', unit:'U2'},
           {label:'Trie Route', icon:'🔀', color:'var(--acc2)', unit:'U3'},
           {label:'Skip Index', icon:'⚡', color:'var(--acc)', unit:'U4'},

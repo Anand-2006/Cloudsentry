@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <string>
 
-// Custom Trie implementation (Unit 3) using std::unordered_map for flexibility.
+// Custom Trie implementation using std::unordered_map for flexibility.
 class TrieNode {
 public:
     std::unordered_map<char, TrieNode*> children;

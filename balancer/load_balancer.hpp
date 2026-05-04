@@ -130,6 +130,7 @@ public:
             int rid = reqIdCounter++;
             servers[cachedSid]->requestQueue.insert({now + slaMs, rid, clientId, priority});
             servers[cachedSid]->activeConnections++;
+            servers[cachedSid]->totalRequests++;
             updateIndex(servers[cachedSid]);
             return {true, cachedSid, rid, "Affinity Match"};
         }
@@ -179,8 +180,8 @@ public:
     // Uses Binomial Heap extractMin() + insert() to redistribute requests,
     // and Skip List updateIndex() to maintain the sorted server index.
     // Complexity: O(k log n) where k = requests in dead queue.
-    void killServer(int sid) {
-        std::lock_guard<std::mutex> lock(lbMutex);
+    // Internal unlocked version — caller must hold lbMutex
+    void killServerUnlocked(int sid) {
         if (sid < 0 || sid >= (int)servers.size()) return;
         
         servers[sid]->healthy = false;
@@ -220,7 +221,12 @@ public:
         servers[sid]->activeConnections = 0;
     }
 
-    void complete(int sid, int rid, int latency, bool failed) {
+    void killServer(int sid) {
+        std::lock_guard<std::mutex> lock(lbMutex);
+        killServerUnlocked(sid);
+    }
+
+    void complete(int sid, int latency, bool failed) {
         std::lock_guard<std::mutex> lock(lbMutex);
         if (sid < 0 || sid >= (int)servers.size()) return;
 
@@ -257,8 +263,8 @@ public:
         return servers[sid]->peakTracker.getMaxRange(startSec, endSec);
     }
 
-    void reviveServer(int sid) {
-        std::lock_guard<std::mutex> lock(lbMutex);
+    // Internal unlocked version — caller must hold lbMutex
+    void reviveServerUnlocked(int sid) {
         if (sid < 0 || sid >= (int)servers.size()) return;
         servers[sid]->healthy = true;
         servers[sid]->circuitState = CircuitState::CLOSED;
@@ -306,20 +312,27 @@ public:
         }
     }
 
+    void reviveServer(int sid) {
+        std::lock_guard<std::mutex> lock(lbMutex);
+        reviveServerUnlocked(sid);
+    }
+
     void killZone(const std::string& zone) {
+        std::lock_guard<std::mutex> lock(lbMutex);
         // DSU batch-kills all servers in this zone component
         zoneDsu.killZone(zone);
         // Then trigger per-server failover for queue migration
         for (auto s : servers) {
-            if (s->zone == zone && s->healthy) killServer(s->id);
+            if (s->zone == zone && s->healthy) killServerUnlocked(s->id);
         }
     }
 
     void reviveZone(const std::string& zone) {
+        std::lock_guard<std::mutex> lock(lbMutex);
         // DSU batch-revives the entire zone component
         zoneDsu.reviveZone(zone);
         for (auto s : servers) {
-            if (s->zone == zone && !s->healthy) reviveServer(s->id);
+            if (s->zone == zone && !s->healthy) reviveServerUnlocked(s->id);
         }
     }
 

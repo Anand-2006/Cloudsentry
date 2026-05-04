@@ -4,7 +4,6 @@
 #include <random>
 #include <iostream>
 
-// A simple, single-threaded Skip List implementation for a 2nd year project.
 // No lock-free or atomic complexity, just the core probabilistic DS.
 
 struct Node {

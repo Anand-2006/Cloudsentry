@@ -117,6 +117,7 @@ public:
     void penalize(int clientId) {
         std::lock_guard<std::mutex> lk(mapMtx);
         if (buckets.count(clientId)) {
+            std::lock_guard<std::mutex> bk(buckets[clientId]->mtx);
             buckets[clientId]->tokens = 0;
         }
     }

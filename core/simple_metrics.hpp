@@ -26,8 +26,8 @@ public:
         return sum;
     }
 
-    // Simplified: just get sum of last 'n' seconds
-    long long getRecentSum(int seconds) const {
+    // Simplified: returns total window sum
+    long long getRecentSum() const {
         // In a real system you'd use timestamps, but for a 2nd year project
         // we can just sum the whole window or a portion of the array.
         return getTotal(); 

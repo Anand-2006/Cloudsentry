@@ -1,7 +1,6 @@
 #include "../balancer/load_balancer.hpp"
 #include <string>
 
-// Bridge for Python ctypes
 extern "C" {
     LoadBalancer* lb_create(int n) {
         return new LoadBalancer(n);
@@ -11,7 +10,6 @@ extern "C" {
         delete lb;
     }
 
-    // Returns a JSON-style string or just success for simplicity
     typedef struct {
         bool accepted;
         int serverId;
@@ -25,7 +23,7 @@ extern "C" {
     }
 
     void lb_complete(LoadBalancer* lb, int sid, int rid, int latency, bool failed) {
-        lb->complete(sid, rid, latency, failed);
+        lb->complete(sid, latency, failed);
     }
 
     int lb_get_connections(LoadBalancer* lb, int sid) {

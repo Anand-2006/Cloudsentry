@@ -126,50 +126,65 @@ def delayed_complete(sid, rid, latency, failed):
 
 def simulation_loop():
     global total_routed
-    paths = ["/api/v1/resource", "/api/v2/data", "/static/images/logo.png", "/auth/login"]
+    paths = ["/api/v1/resource", "/api/v2/data", "/static/images/logo.png", "/auth/login", "/search?q=query", "/checkout/cart", "/users/settings"]
     active_sessions = []
 
     while True:
         try:
             t = time.time()
-            wave = abs(math.sin(t / 7.0)) + (math.cos(t / 11.0) * 0.3)
-            base_load = 45 
-            amplitude = 120 
+            # More complex, chaotic wave pattern
+            wave = abs(math.sin(t / 7.0)) + (math.cos(t / 11.0) * 0.4) + (math.sin(t / 3.14) * 0.2)
+            base_load = random.randint(40, 60) 
+            amplitude = random.randint(100, 160)
             
             target_load = (base_load + (wave * amplitude)) * (SIM_INTENSITY / 100.0)
             
-            if random.random() < 0.08:
-                target_load += random.randint(100, 200)
-                print(f"[Simulation] Rare Traffic Spike: {int(target_load)} req/s")
+            # Burst traffic scales slightly with intensity
+            spike_chance = 0.05 + (0.05 * (SIM_INTENSITY / 200.0))
+            if random.random() < spike_chance:
+                target_load += random.randint(150, 400)
+                print(f"[Simulation] Burst Traffic Spike: {int(target_load)} req/s")
 
-            while len(active_sessions) < 12:
-                active_sessions.append([random.randint(100, 999), random.randint(3, 8), random.choice(paths)])
+            # Dynamic session pool size
+            target_sessions = random.randint(8, 24)
+            while len(active_sessions) < target_sessions:
+                active_sessions.append([random.randint(100, 9999), random.randint(2, 25), random.choice(paths)])
             
-            batch_size = int(random.gauss(target_load, 25)) 
-            batch_size = max(15, batch_size) 
+            # Variance scales with the target load
+            batch_size = int(random.gauss(target_load, target_load * 0.2)) 
+            batch_size = max(10, batch_size) 
             
             actually_routed = 0
             with lock:
                 for _ in range(batch_size):
-                    if random.random() < 0.7 and active_sessions:
+                    # 75% chance to use an existing session for affinity testing
+                    if random.random() < 0.75 and active_sessions:
                         idx = random.randint(0, len(active_sessions)-1)
                         client_id, rem, path = active_sessions[idx]
                         active_sessions[idx][1] -= 1
                         if active_sessions[idx][1] <= 0:
                             active_sessions.pop(idx)
                     else:
-                        client_id = random.randint(1000, 5000)
+                        client_id = random.randint(1000, 9999)
                         path = random.choice(paths)
                     
-                    priority = random.choice([1, 1, 2, 3, 5])
+                    priority = random.choice([1, 1, 2, 2, 3, 5])
                     
                     res = lb.route(client_id, priority, path)
                     if res['accepted']:
                         total_routed += 1
                         actually_routed += 1
-                        lat = int(random.gauss(1500, 300))
-                        lat = max(200, min(3000, lat))
-                        is_error = random.random() < 0.015
+                        
+                        # Simulate tail latency (p98 spikes)
+                        if random.random() < 0.02:
+                            lat = random.randint(3000, 6000)
+                        else:
+                            lat = int(random.gauss(1200, 350))
+                        lat = max(150, min(6000, lat))
+                        
+                        # Error chance increases slightly under heavy load
+                        error_chance = 0.005 + (batch_size / 8000.0)
+                        is_error = random.random() < error_chance
                         
                         threading.Thread(
                             target=delayed_complete, 
@@ -357,3 +372,25 @@ def toggle_chaos():
 def chaos_status():
     return {"enabled": CHAOS_ENABLED, "log": list(chaos_events_log)}
 
+@app.post("/demo/ddos")
+def demo_ddos():
+    with lock:
+        dropped = 0
+        for _ in range(150):
+            res = lb.route(666, 1, "/api/v1/resource")
+            if not res['accepted']: dropped += 1
+        
+        msg = f"🛑 DDoS Attack Simulated (Client 666). Rate Limiter blocked {dropped} requests."
+        events.appendleft({"type": "spike", "msg": msg, "ts": int(time.time())})
+    return {"ok": True, "dropped": dropped}
+
+@app.post("/demo/affinity")
+def demo_affinity():
+    with lock:
+        for _ in range(50):
+            res = lb.route(777, 5, "/api/v2/data")
+            if res['accepted']:
+                threading.Thread(target=delayed_complete, args=(res['serverId'], res['requestId'], 25, False), daemon=True).start()
+        msg = "⚡ Session Affinity Burst (Client 777) routed instantly via Splay Tree Cache."
+        events.appendleft({"type": "info", "msg": msg, "ts": int(time.time())})
+    return {"ok": True}
