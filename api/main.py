@@ -114,6 +114,7 @@ dead_zones = set()
 events = deque(maxlen=15)
 throughput_history = deque([0]*60, maxlen=60)
 total_routed = 0
+incoming_requests_this_second = 0
 lock = threading.Lock()
 
 SIM_INTENSITY = 100 
@@ -154,8 +155,11 @@ def simulation_loop():
             batch_size = int(random.gauss(target_load, target_load * 0.2)) 
             batch_size = max(10, batch_size) 
             
-            actually_routed = 0
+            global incoming_requests_this_second
             with lock:
+                incoming_requests_this_second += batch_size
+                drops_this_tick = 0
+                
                 for _ in range(batch_size):
                     # 75% chance to use an existing session for affinity testing
                     if random.random() < 0.75 and active_sessions:
@@ -173,7 +177,6 @@ def simulation_loop():
                     res = lb.route(client_id, priority, path)
                     if res['accepted']:
                         total_routed += 1
-                        actually_routed += 1
                         
                         # Simulate tail latency (p98 spikes)
                         if random.random() < 0.02:
@@ -192,10 +195,13 @@ def simulation_loop():
                             daemon=True
                         ).start()
                     else:
-                        if len(events) < 50:
-                            events.appendleft({"type": "drop", "msg": f"L7 Drop: {res['reason']}", "ts": int(time.time())})
+                        drops_this_tick += 1
 
-                throughput_history.append(actually_routed)
+                if drops_this_tick > 0 and len(events) < 50:
+                    events.appendleft({"type": "drop", "msg": f"L7 Drop: Token Bucket Depleted ({drops_this_tick} requests dropped)", "ts": int(time.time())})
+
+                throughput_history.append(incoming_requests_this_second)
+                incoming_requests_this_second = 0
             
             time.sleep(1)
         except Exception as sim_err:
@@ -374,7 +380,9 @@ def chaos_status():
 
 @app.post("/demo/ddos")
 def demo_ddos():
+    global incoming_requests_this_second
     with lock:
+        incoming_requests_this_second += 150
         dropped = 0
         for _ in range(150):
             res = lb.route(666, 1, "/api/v1/resource")
@@ -386,7 +394,9 @@ def demo_ddos():
 
 @app.post("/demo/affinity")
 def demo_affinity():
+    global incoming_requests_this_second
     with lock:
+        incoming_requests_this_second += 50
         for _ in range(50):
             res = lb.route(777, 5, "/api/v2/data")
             if res['accepted']:
